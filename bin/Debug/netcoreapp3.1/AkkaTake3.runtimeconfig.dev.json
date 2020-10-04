@@ -1,0 +1,8 @@
+{
+  "runtimeOptions": {
+    "additionalProbingPaths": [
+      "/Users/bhadraam/.dotnet/store/|arch|/|tfm|",
+      "/Users/bhadraam/.nuget/packages"
+    ]
+  }
+}

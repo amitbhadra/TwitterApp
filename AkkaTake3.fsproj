@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.fsx" />
+    <None Include="messageSink.fsx" />
+    <PackageReference Include="FSharp.Core" Version="4.7.2" />
+    <PackageReference Include="Akka.Remote" Version="1.4.10" />
+    <PackageReference Include="Akka.FSharp" Version="1.4.10" />
+    <PackageReference Include="Akka.TestKit" Version="1.4.10" />
+    <None Include="converter.fsx" />
+    <Compile Include="trial.fsx" />
+    <None Include="eventStream.fsx" />
+    <None Include="killMePlease.fsx" />
+    <None Include="nd.fsx" />
+    <None Include="Program2.fsx" />
+    <None Include="Program1.5.fsx" />
+    <Compile Include="HW1_1.fsx" />
+    <Compile Include="HW1_2.fsx" />
+    <None Include="remote.fsx" />
+    <None Include="remote_b.fsx" />
+    <None Include="local.fsx" />
+    <None Include="HW1_3.fsx" />
+    <None Include="local_dos1.fsx" />
+    <None Include="DOS_main.fsx" />
+    <None Include="local_dos2.fsx" />
+    <None Include="remote_dos1.fsx" />
+    <None Include="typedMessages.fsx" />
+    <None Include="Proj2.fsx" />
+    <None Include="test2.fsx" />
+  </ItemGroup>
+</Project>
