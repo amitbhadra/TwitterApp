@@ -24,22 +24,12 @@ let timer = System.Diagnostics.Stopwatch()
 
 // Define the type of messages this program can send or receive
 type MyMessage =
-| MessageType1 of int*int
-| MessageType2 of int
-| MessageType3 of int*string
-| MessageType4 of Array
-| MessageType5 of int
-| MessageType6 of int*string*string*Akka.Actor.ActorSystem
-| MessageType7 of string
-| MessageType8 of int
-| MessageType9 of int*int*string*string
-| MessageType10 of int*int*string
-| MessageType11 of int
-| MessageType12 of string
-| MessageType13 of int
-| MessageType14 of int
-| MessageType15 of double*double
-| MessageType16 of double*double
+| GetNeighbors of int
+| SendMessageBoss of int*string*string*Akka.Actor.ActorSystem
+| Gossip of string
+| SendMessageGossip of string
+| SendMessagePush of double*double
+| PushSum of double*double
 
 let find_left_neighbor n max_index = 
     if (n<>1) then
@@ -91,12 +81,13 @@ let mutable max_index_2d = 0
 
 let converged_nodes_array idx rumor= 
     if(converged_actors.[idx] = 0) then
-        //printfn "Converged %d" idx
+        //slave_actor_refs.[idx] <- 0
+        printfn "Converged %d" idx
         converged_actors.[idx] <- 1
         alive_nodes <- alive_nodes |> Array.filter ((<>)idx)
         converged_nodes <- converged_nodes + 1
-        //printfn "Total finished %d" converged_nodes
-    if(alive_nodes.Length = 1 || converged_nodes = num_nodes) then
+        printfn "Total finished %d" converged_nodes
+    if(alive_nodes.Length = 1 || float(converged_nodes) >= 0.99*float(num_nodes)) then
         printfn "------------------------ALL DONE------------------------"
         timer.Stop()
         printfn "%f" timer.Elapsed.TotalMilliseconds                                   
@@ -105,7 +96,7 @@ let converged_nodes_array idx rumor=
     let mutable random = new System.Random()
     let mutable new_random_idx = random.Next(1, alive_nodes.Length)
     //Console.WriteLine("Sending message to {0}", [alive_nodes.[new_random_idx]])
-    slave_actor_refs.[alive_nodes.[new_random_idx]] <! MessageType12(rumor)
+    slave_actor_refs.[alive_nodes.[new_random_idx]] <! SendMessageGossip(rumor)
 
 
 let converged_nodes_array_push_sum idx= 
@@ -115,7 +106,7 @@ let converged_nodes_array_push_sum idx=
         alive_nodes <- alive_nodes |> Array.filter ((<>)idx)
         converged_nodes <- converged_nodes + 1
         //printfn "Total finished %d" converged_nodes
-    if(alive_nodes.Length = 1 || converged_nodes = num_nodes) then
+    if(alive_nodes.Length = 1 || converged_nodes >= num_nodes) then
         printfn "------------------------ALL DONE------------------------"
         timer.Stop()
         printfn "%f" timer.Elapsed.TotalMilliseconds                                   
@@ -124,7 +115,7 @@ let converged_nodes_array_push_sum idx=
     let mutable random = new System.Random()
     let mutable new_random_idx = random.Next(1, alive_nodes.Length)
     //Console.WriteLine("Sending message to {0}", [alive_nodes.[new_random_idx]])
-    slave_actor_refs.[alive_nodes.[new_random_idx]] <! MessageType15(0.0, 0.0)
+    slave_actor_refs.[alive_nodes.[new_random_idx]] <! SendMessagePush(0.0, 0.0)
 
 
 // This is the slave actor which will take in a number N and k, and return N if its a perfect number or 0 of not
@@ -134,7 +125,7 @@ let mySlaveActor (mailbox: Actor<_>) =
         let! rcv = mailbox.Receive()
 
         match rcv with
-        | MessageType2(idx) ->
+        | GetNeighbors(idx) ->
                         if (topo = "line") then
                             //let mutable n_left = find_left_neighbor idx num_nodes
                             //let mutable n_right = 
@@ -162,33 +153,35 @@ let mySlaveActor (mailbox: Actor<_>) =
                             //printfn "For %d return array is %A" idx return_array
                             return! loop idx rumor visited return_array
 
-        | MessageType12(rumor_string) ->
+        | SendMessageGossip(rumor_string) ->
 
                         if (visited_actors.[actor_idx] < 10) then
-                            slave_actor_refs.[actor_idx] <! MessageType7(rumor_string)
+                            visited_actors.[actor_idx] <- (visited_actors.[actor_idx] + 1)
+                            slave_actor_refs.[actor_idx] <! Gossip(rumor_string)
                             return! loop actor_idx rumor_string (visited+1) neighbors
                         else
+                            //Console.WriteLine("Must call random neighbor from {0}", actor_idx)
                             converged_nodes_array actor_idx rumor
                             return! loop actor_idx rumor_string visited neighbors
 
-        | MessageType7(rumor_string) ->
-                        visited_actors.[actor_idx] <- (visited_actors.[actor_idx] + 1)
+        | Gossip(rumor_string) ->
 
                         if(visited_actors.[actor_idx] >= 10) then
                             converged_nodes_array actor_idx rumor
                             return! loop actor_idx rumor_string (visited+1) neighbors
                         else
+                            //Console.WriteLine("Visiting {0}", actor_idx)
                             let mutable random = new System.Random()
 
                             let mutable advanced_neighbors = neighbors
-                            
+
                             if(topo = "imp2D") then
                                 let mutable all_actors = [|1..num_nodes|]
                                 for i in 0..advanced_neighbors.Length-1 do
                                     all_actors <- all_actors |> Array.filter ((<>) advanced_neighbors.[i] )
                                 let mutable random_all_actors_idx = random.Next(0, all_actors.Length)
                                 advanced_neighbors <- Array.append advanced_neighbors [|all_actors.[random_all_actors_idx]|]
-                                
+
                             let mutable random_idx = random.Next(0, advanced_neighbors.Length)
 
                             // iterate neighbors.Length * 2 times over the neighbors and if all are visited then choose a random number
@@ -201,12 +194,16 @@ let mySlaveActor (mailbox: Actor<_>) =
                                 iterator <- iterator + 1
 
                             if(visited_actors.[advanced_neighbors.[random_idx]] < 10) then
-                                slave_actor_refs.[advanced_neighbors.[random_idx]] <! MessageType12(rumor)
+                                slave_actor_refs.[advanced_neighbors.[random_idx]] <! SendMessageGossip(rumor)
                             else
                                 let mutable random = new System.Random()
                                 let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-                                slave_actor_refs.[new_random_idx] <! MessageType12(rumor)
+                                slave_actor_refs.[new_random_idx] <! SendMessageGossip(rumor)
 
+                                let mutable sleep_itr = 0
+                                while(sleep_itr < 1000) do
+                                    sleep_itr <- (sleep_itr + 1)
+                            slave_actor_refs.[actor_idx] <! Gossip(rumor)
                             return! loop actor_idx rumor_string (visited+1) neighbors
         | _ -> printfn "Incorrect entry"                
     }
@@ -220,7 +217,7 @@ let myPushSumActor (mailbox: Actor<_>) =
         let! rcv = mailbox.Receive()
 
         match rcv with
-        | MessageType2(idx) ->
+        | GetNeighbors(idx) ->
                         if (topo = "line") then
                             let mutable return_array = Array.create 2 -1
                             return_array.[0] <- find_left_neighbor idx num_nodes
@@ -246,16 +243,16 @@ let myPushSumActor (mailbox: Actor<_>) =
                             //printfn "For %d return array is %A" idx return_array
                             return! loop idx state_1 state_2 state_3 (double(idx)) 1.0 return_array
 
-        | MessageType15(new_s, new_w) ->
+        | SendMessagePush(new_s, new_w) ->
                         //printfn "At %d" actor_idx
                         if (converged_actors.[actor_idx] = 0) then
-                            slave_actor_refs.[actor_idx] <! MessageType16(new_s, new_w)
+                            slave_actor_refs.[actor_idx] <! PushSum(new_s, new_w)
                             return! loop actor_idx  state_1 state_2 state_3 s w neighbors
                         else
                             converged_nodes_array_push_sum actor_idx
                             return! loop actor_idx  state_1 state_2 state_3 s w neighbors
 
-        | MessageType16(new_s, new_w) ->
+        | PushSum(new_s, new_w) ->
 
                         let mutable updated_s = s + new_s
                         let mutable updated_w = w + new_w
@@ -293,11 +290,11 @@ let myPushSumActor (mailbox: Actor<_>) =
                                 iterator <- iterator + 1
 
                             if(visited_actors.[advanced_neighbors.[random_idx]] = 0) then
-                                slave_actor_refs.[advanced_neighbors.[random_idx]] <! MessageType15(updated_s/2.0, updated_w/2.0)
+                                slave_actor_refs.[advanced_neighbors.[random_idx]] <! SendMessagePush(updated_s/2.0, updated_w/2.0)
                             else
                                 let mutable random = new System.Random()
                                 let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-                                slave_actor_refs.[new_random_idx] <! MessageType15(updated_s/2.0, updated_w/2.0)
+                                slave_actor_refs.[new_random_idx] <! SendMessagePush(updated_s/2.0, updated_w/2.0)
 
                             return! loop actor_idx state_2 state_3 ratio (updated_s/2.0) (updated_w/2.0) neighbors
         | _ -> printfn "Incorrect entry"                
@@ -309,7 +306,7 @@ let myBossActor (mailbox: Actor<_>) =
     let rec loop() = actor {
         let! rcv = mailbox.Receive()
         match rcv with
-        | MessageType6(max_nodes, topology, algorithm, system) ->
+        | SendMessageBoss(max_nodes, topology, algorithm, system) ->
 
                         topo <- topology
                         num_nodes <- max_nodes
@@ -329,13 +326,13 @@ let myBossActor (mailbox: Actor<_>) =
                             for i in 1..num_nodes do
                                 let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) mySlaveActor
                                 Array.set slave_actor_refs i worker_slave_actor
-                                slave_actor_refs.[i] <! MessageType2(i)
+                                slave_actor_refs.[i] <! GetNeighbors(i)
                                 alive_nodes.[i] <- i 
                         else if(algorithm = "push-sum") then
                             for i in 1..num_nodes do
                                 let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPushSumActor
                                 Array.set slave_actor_refs i worker_slave_actor
-                                slave_actor_refs.[i] <! MessageType2(i)
+                                slave_actor_refs.[i] <! GetNeighbors(i)
                                 alive_nodes.[i] <- i 
 
                         printfn "Done with slave actors initialization!"
@@ -343,9 +340,9 @@ let myBossActor (mailbox: Actor<_>) =
                         timer.Start()
 
                         if (algorithm = "gossip") then
-                            slave_actor_refs.[1] <! MessageType12("Hello")
+                            slave_actor_refs.[1] <! SendMessageGossip("Hello")
                         else if(algorithm = "push-sum") then
-                            slave_actor_refs.[num_nodes/2] <! MessageType15(0.0, 0.0)
+                            slave_actor_refs.[num_nodes/2] <! SendMessagePush(0.0, 0.0)
                         
         | _ -> printfn "Incorrect entry"                    
         return! loop()
@@ -366,7 +363,7 @@ let main argv =
     boss_actor_ref <- Array.zeroCreate 1
     boss_actor_ref.[0] <- bossActor
 
-    bossActor <! MessageType6(num_nodes, topology, algorithm, system)
+    bossActor <! SendMessageBoss(num_nodes, topology, algorithm, system)
 
 
     while(ALL_COMPUTATIONS_DONE = 0) do
