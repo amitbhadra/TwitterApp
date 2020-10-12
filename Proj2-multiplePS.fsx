@@ -126,7 +126,6 @@ let mySlaveActor (mailbox: Actor<_>) =
 
         match rcv with
         | GetNeighbors(idx) ->
-
                         if (topo = "line") then
                             //let mutable n_left = find_left_neighbor idx num_nodes
                             //let mutable n_right = 
@@ -185,12 +184,12 @@ let mySlaveActor (mailbox: Actor<_>) =
 
                             let mutable random_idx = random.Next(0, advanced_neighbors.Length)
 
-                            // iterate Math.Max(1000, num_nodes*3 times over the neighbors and if all are visited then choose a random number
+                            // iterate neighbors.Length * 2 times over the neighbors and if all are visited then choose a random number
                             // neighbors.Length * 2 is chosen because we don't want the loop to be ever-lasting and it seems like a 
                             // reasonable enough value
                             let mutable iterator = 0
 
-                            while (visited_actors.[advanced_neighbors.[random_idx]] < 10 && iterator <= Math.Max(1000, num_nodes*3)) do
+                            while (visited_actors.[advanced_neighbors.[random_idx]] < 10 && iterator <= advanced_neighbors.Length * 2) do
                                 random_idx <- random.Next(0, advanced_neighbors.Length)
                                 iterator <- iterator + 1
 
@@ -219,12 +218,12 @@ let myPushSumActor (mailbox: Actor<_>) =
 
         match rcv with
         | GetNeighbors(idx) ->
-
                         if (topo = "line") then
                             let mutable return_array = Array.create 2 -1
                             return_array.[0] <- find_left_neighbor idx num_nodes
                             return_array.[1] <- find_right_neighbor idx num_nodes
                             return_array <- return_array |> Array.filter ((<>) -1 )
+                            //printfn "For %d return array is %A" idx return_array
                             return! loop idx state_1 state_2 state_3 (double(idx)) 1.0 return_array
 
                         if (topo = "full") then
@@ -241,10 +240,11 @@ let myPushSumActor (mailbox: Actor<_>) =
                             return_array.[2] <- find_right_neighbor_2d idx max_index_2d
                             return_array.[3] <- find_left_neighbor_2d idx max_index_2d
                             return_array <- return_array |> Array.filter ((<>) -1 )
+                            //printfn "For %d return array is %A" idx return_array
                             return! loop idx state_1 state_2 state_3 (double(idx)) 1.0 return_array
 
         | SendMessagePush(new_s, new_w) ->
-
+                        //printfn "At %d" actor_idx
                         if (converged_actors.[actor_idx] = 0) then
                             slave_actor_refs.[actor_idx] <! PushSum(new_s, new_w)
                             return! loop actor_idx  state_1 state_2 state_3 s w neighbors
@@ -280,12 +280,12 @@ let myPushSumActor (mailbox: Actor<_>) =
                                 
                             let mutable random_idx = random.Next(0, advanced_neighbors.Length)
 
-                            // iterate Math.Max(1000, num_nodes*3) times over the neighbors and if all are visited then choose a random number
+                            // iterate neighbors.Length * 2 times over the neighbors and if all are visited then choose a random number
                             // neighbors.Length * 2 is chosen because we don't want the loop to be ever-lasting and it seems like a 
                             // reasonable enough value
                             let mutable iterator = 0
 
-                            while (converged_actors.[advanced_neighbors.[random_idx]] = 1 && iterator <= Math.Max(1000, num_nodes*3)) do
+                            while (converged_actors.[advanced_neighbors.[random_idx]] = 1 && iterator <= 1000) do
                                 random_idx <- random.Next(0, advanced_neighbors.Length)
                                 iterator <- iterator + 1
 
