@@ -30,6 +30,8 @@ type MyMessage =
 | SendMessageGossip of string
 | SendMessagePush of double*double
 | PushSum of double*double
+| Ping of int
+| ReceivePing of int*int
 
 let find_left_neighbor n max_index = 
     if (n<>1) then
@@ -77,11 +79,11 @@ let mutable converged_nodes = 0
 let mutable topo = ""
 let mutable num_nodes = 0
 let mutable max_index_2d = 0
+let convergence = 10
 
 
 let converged_nodes_array idx rumor= 
     if(converged_actors.[idx] = 0) then
-        //slave_actor_refs.[idx] <- 0
         printfn "Converged %d" idx
         converged_actors.[idx] <- 1
         alive_nodes <- alive_nodes |> Array.filter ((<>)idx)
@@ -95,7 +97,6 @@ let converged_nodes_array idx rumor=
         exit(0)
     let mutable random = new System.Random()
     let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-    //Console.WriteLine("Sending message to {0}", [alive_nodes.[new_random_idx]])
     slave_actor_refs.[alive_nodes.[new_random_idx]] <! SendMessageGossip(rumor)
 
 
@@ -105,7 +106,6 @@ let converged_nodes_array_push_sum idx=
         converged_actors.[idx] <- 1
         alive_nodes <- alive_nodes |> Array.filter ((<>)idx)
         converged_nodes <- converged_nodes + 1
-        //printfn "Total finished %d" converged_nodes
     if(alive_nodes.Length = 1 || converged_nodes >= num_nodes) then
         printfn "------------------------ALL DONE------------------------"
         timer.Stop()
@@ -114,13 +114,15 @@ let converged_nodes_array_push_sum idx=
         exit(0)
     let mutable random = new System.Random()
     let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-    //Console.WriteLine("Sending message to {0}", [alive_nodes.[new_random_idx]])
     slave_actor_refs.[alive_nodes.[new_random_idx]] <! SendMessagePush(0.0, 0.0)
+
+    
+let findIndex arr elem = arr |> Array.findIndex ((=) elem)
 
 
 // This is the slave actor which will take in a number N and k, and return N if its a perfect number or 0 of not
 let mySlaveActor (mailbox: Actor<_>) =
-    let rec loop actor_idx rumor visited neighbors = actor {
+    let rec loop actor_idx rumor visited neighbors alive_status num_pings = actor {
 
         let! rcv = mailbox.Receive()
 
@@ -132,14 +134,18 @@ let mySlaveActor (mailbox: Actor<_>) =
                             return_array.[0] <- find_left_neighbor idx num_nodes
                             return_array.[1] <- find_right_neighbor idx num_nodes
                             return_array <- return_array |> Array.filter ((<>) -1 )
-                            return! loop idx rumor visited return_array
+                            let mutable alive_status_array = Array.create return_array.Length 0
+                            let mutable num_pings_array = Array.create return_array.Length 0
+                            return! loop idx rumor visited return_array alive_status_array num_pings_array
 
                         if (topo = "full") then
                             let mutable return_array = Array.create (num_nodes+1) -1
                             for i in 1..num_nodes do
                                 return_array.[i] <- i
                             return_array <- return_array |> Array.filter ((<>) -1 )
-                            return! loop idx rumor visited return_array
+                            let mutable alive_status_array = Array.create return_array.Length 0
+                            let mutable num_pings_array = Array.create return_array.Length 0
+                            return! loop idx rumor visited return_array alive_status_array num_pings_array
 
                         if (topo = "2D" || topo = "imp2D") then
                             let mutable return_array = Array.create 4 -1
@@ -148,66 +154,155 @@ let mySlaveActor (mailbox: Actor<_>) =
                             return_array.[2] <- find_right_neighbor_2d idx max_index_2d
                             return_array.[3] <- find_left_neighbor_2d idx max_index_2d
                             return_array <- return_array |> Array.filter ((<>) -1 )
-                            return! loop idx rumor visited return_array
+                            let mutable alive_status_array = Array.create return_array.Length 0
+                            let mutable num_pings_array = Array.create return_array.Length 0
+                            return! loop idx rumor visited return_array alive_status_array num_pings_array
+
+        | Ping(sender_idx) ->
+
+                        let mutable random = new System.Random()
+                        let mutable random_num = random.Next(0, 500)
+                        if(random_num >= 0 && random_num <=496) then
+                            slave_actor_refs.[sender_idx] <! ReceivePing(actor_idx, 1)
+                        elif (random_num >= 497 && random_num <=498) then
+                            slave_actor_refs.[sender_idx] <! ReceivePing(actor_idx, 0)
+                        else
+                            slave_actor_refs.[sender_idx] <! ReceivePing(actor_idx, -1)
+                        return! loop actor_idx rumor visited neighbors alive_status num_pings
+
+        | ReceivePing(node_idx, node_status) ->
+
+                        //If node_status = 1 it means node_idx is alive
+                        //If node_status = 0 it means node_idx is temporarily dead
+                        //If node_status = -1 it means node_idx is permanently dead
+
+                        let mutable neighbor_array = neighbors 
+                        let mutable alive_status_array = alive_status 
+                        let mutable num_pings_array = num_pings
+
+                        let find_index elem =
+                            try
+                                findIndex neighbors node_idx
+                            with
+                                | :? System.Collections.Generic.KeyNotFoundException -> 
+                                    -1
+                        let mutable neighbor_relative_idx = find_index node_idx
+
+                        //printfn "Searching for %d in %A where actor is %d" node_idx neighbors actor_idx
+                        //printfn "Relative index is %d" neighbor_relative_idx
+
+                        if(neighbor_relative_idx <> -1) then
+                            let update_neighbor_status = 
+                                try
+                                    if(node_status = 1) then
+                                        num_pings.[neighbor_relative_idx] <- 0
+                                        alive_status.[neighbor_relative_idx] <- 1
+
+                                    elif(node_status = 0) then
+                                        // find the idx of node_idx in the arrays
+                                        num_pings_array.[neighbor_relative_idx] <- num_pings_array.[neighbor_relative_idx] + 1
+                                        alive_status_array.[neighbor_relative_idx] <- -1
+
+                                        if(num_pings_array.[neighbor_relative_idx] >= 5) then
+                                            printfn "Connection to %d and %d is permanently dead!" node_idx actor_idx
+
+                                            neighbor_array.[neighbor_relative_idx] <- -1
+                                            alive_status_array.[neighbor_relative_idx] <- -1
+                                            num_pings_array.[neighbor_relative_idx] <- -1
+
+                                            neighbor_array <- neighbor_array |> Array.filter ((<>) -1 )
+                                            alive_status_array <- alive_status_array |> Array.filter ((<>) -1) 
+                                            num_pings_array <- num_pings_array |> Array.filter ((<>) -1)
+
+                                        else
+                                            printfn "Connection to %d and %d is temporarily blocked" node_idx actor_idx
+
+                                    else
+                                        printfn "Node %d is dead!" node_idx
+                                        neighbor_array.[neighbor_relative_idx] <- -1
+                                        alive_status_array.[neighbor_relative_idx] <- -1
+                                        num_pings_array.[neighbor_relative_idx] <- -1
+
+                                        neighbor_array <- neighbor_array |> Array.filter ((<>) -1 )
+                                        alive_status_array <- alive_status_array |> Array.filter ((<>) -1) 
+                                        num_pings_array <- num_pings_array |> Array.filter ((<>) -1)
+                                        visited_actors.[node_idx] <- 10
+                                        converged_nodes_array node_idx rumor
+                                with 
+                                    | _ as ex->
+                                        printfn "Neighbor deleted by some other thread"
+
+                            update_neighbor_status
+
+                        return! loop actor_idx rumor visited neighbor_array alive_status_array num_pings_array
+
 
         | SendMessageGossip(rumor_string) ->
 
-                        if (visited_actors.[actor_idx] < 10) then
+                        if (visited_actors.[actor_idx] < convergence) then
                             visited_actors.[actor_idx] <- (visited_actors.[actor_idx] + 1)
                             slave_actor_refs.[actor_idx] <! Gossip(rumor_string)
-                            return! loop actor_idx rumor_string (visited+1) neighbors
+                            return! loop actor_idx rumor_string (visited+1) neighbors alive_status num_pings
                         else
-                            //Console.WriteLine("Must call random neighbor from {0}", actor_idx)
                             converged_nodes_array actor_idx rumor
-                            return! loop actor_idx rumor_string visited neighbors
+                            return! loop actor_idx rumor_string visited neighbors alive_status num_pings
 
         | Gossip(rumor_string) ->
+                        let send_message = 
+                            try
+                                for i in neighbors do
+                                    slave_actor_refs.[i] <! Ping(actor_idx)
 
-                        if(visited_actors.[actor_idx] >= 10) then
-                            converged_nodes_array actor_idx rumor
-                            return! loop actor_idx rumor_string (visited+1) neighbors
-                        else
-                            Console.WriteLine("Visiting {0}", actor_idx)
-                            if(topo = "line") then
-                                Thread.Sleep(5)
-                            let mutable random = new System.Random()
+                                if(visited_actors.[actor_idx] >= convergence) then
+                                    converged_nodes_array actor_idx rumor
+                                else
+                                    //Console.WriteLine("Visiting {0}", actor_idx)
+                                    if(topo = "line") then
+                                        Thread.Sleep(5)
+                                        //Async.Sleep(5) |> Async.RunSynchronously
+                                    let mutable random = new System.Random()
 
-                            let mutable advanced_neighbors = neighbors
+                                    let mutable advanced_neighbors = neighbors
 
-                            if(topo = "imp2D") then
-                                let mutable all_actors = [|1..num_nodes|]
-                                for i in 0..advanced_neighbors.Length-1 do
-                                    all_actors <- all_actors |> Array.filter ((<>) advanced_neighbors.[i] )
-                                let mutable random_all_actors_idx = random.Next(0, all_actors.Length)
-                                advanced_neighbors <- Array.append advanced_neighbors [|all_actors.[random_all_actors_idx]|]
+                                    if(topo = "imp2D") then
+                                        let mutable all_actors = [|1..num_nodes|]
+                                        for i in 0..advanced_neighbors.Length-1 do
+                                            all_actors <- all_actors |> Array.filter ((<>) advanced_neighbors.[i] )
+                                        let mutable random_all_actors_idx = random.Next(0, all_actors.Length)
+                                        advanced_neighbors <- Array.append advanced_neighbors [|all_actors.[random_all_actors_idx]|]
 
-                            let mutable random_idx = random.Next(0, advanced_neighbors.Length)
+                                    let mutable random_idx = random.Next(0, advanced_neighbors.Length)
 
-                            // iterate Math.Max(1000, num_nodes*3 times over the neighbors and if all are visited then choose a random number
-                            // neighbors.Length * 2 is chosen because we don't want the loop to be ever-lasting and it seems like a 
-                            // reasonable enough value
-                            let mutable iterator = 0
+                                    // iterate Math.Max(1000, num_nodes*3 times over the neighbors and if all are visited then choose a random number
+                                    // neighbors.Length * 2 is chosen because we don't want the loop to be ever-lasting and it seems like a 
+                                    // reasonable enough value
+                                    let mutable iterator = 0
 
-                            while (visited_actors.[advanced_neighbors.[random_idx]] < 10 && iterator <= Math.Max(1000, num_nodes*3)) do
-                                random_idx <- random.Next(0, advanced_neighbors.Length)
-                                iterator <- iterator + 1
+                                    while (visited_actors.[advanced_neighbors.[random_idx]] < convergence && iterator <= Math.Max(1000, num_nodes*3)) do
+                                        random_idx <- random.Next(0, advanced_neighbors.Length)
+                                        iterator <- iterator + 1
 
-                            if(visited_actors.[advanced_neighbors.[random_idx]] < 10) then
-                                slave_actor_refs.[advanced_neighbors.[random_idx]] <! SendMessageGossip(rumor)
-                            else
-                                let mutable random = new System.Random()
-                                let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-                                slave_actor_refs.[new_random_idx] <! SendMessageGossip(rumor)
+                                    if(visited_actors.[advanced_neighbors.[random_idx]] < convergence) then
+                                        slave_actor_refs.[advanced_neighbors.[random_idx]] <! SendMessageGossip(rumor)
+                                    else
+                                        let mutable random = new System.Random()
+                                        let mutable new_random_idx = random.Next(1, alive_nodes.Length)
+                                        slave_actor_refs.[new_random_idx] <! SendMessageGossip(rumor)
 
-                                let mutable sleep_itr = 0
-                                while(sleep_itr < 1000) do
-                                    sleep_itr <- (sleep_itr + 1)
+                                        let mutable sleep_itr = 0
+                                        while(sleep_itr < 1000) do
+                                            sleep_itr <- (sleep_itr + 1)
 
-                            slave_actor_refs.[actor_idx] <! Gossip(rumor)
-                            return! loop actor_idx rumor_string (visited+1) neighbors
+                                    slave_actor_refs.[actor_idx] <! Gossip(rumor)
+
+                            with 
+                                | _ as ex->
+                                    printfn "Neighbor deleted by some other thread"
+                        send_message
+                        return! loop actor_idx rumor_string (visited+1) neighbors alive_status num_pings
         | _ -> printfn "Incorrect entry"                
     }
-    loop 0 "abc" 0 [||]
+    loop 0 "abc" 0 [||] [||] [||]
 
 
 // This is the slave actor which will take in a number N and k, and return N if its a perfect number or 0 of not

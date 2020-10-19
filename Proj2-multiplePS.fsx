@@ -81,7 +81,6 @@ let mutable max_index_2d = 0
 
 let converged_nodes_array idx rumor= 
     if(converged_actors.[idx] = 0) then
-        //slave_actor_refs.[idx] <- 0
         printfn "Converged %d" idx
         converged_actors.[idx] <- 1
         alive_nodes <- alive_nodes |> Array.filter ((<>)idx)
@@ -95,17 +94,16 @@ let converged_nodes_array idx rumor=
         exit(0)
     let mutable random = new System.Random()
     let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-    //Console.WriteLine("Sending message to {0}", [alive_nodes.[new_random_idx]])
     slave_actor_refs.[alive_nodes.[new_random_idx]] <! SendMessageGossip(rumor)
 
 
-let converged_nodes_array_push_sum idx= 
+let converged_nodes_array_push_sum idx s w= 
     if(converged_actors.[idx] = 0) then
         printfn "Converged %d" idx
         converged_actors.[idx] <- 1
         alive_nodes <- alive_nodes |> Array.filter ((<>)idx)
         converged_nodes <- converged_nodes + 1
-        //printfn "Total finished %d" converged_nodes
+        printfn "Total finished %d" converged_nodes
     if(alive_nodes.Length = 1 || converged_nodes >= num_nodes) then
         printfn "------------------------ALL DONE------------------------"
         timer.Stop()
@@ -114,8 +112,7 @@ let converged_nodes_array_push_sum idx=
         exit(0)
     let mutable random = new System.Random()
     let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-    //Console.WriteLine("Sending message to {0}", [alive_nodes.[new_random_idx]])
-    slave_actor_refs.[alive_nodes.[new_random_idx]] <! SendMessagePush(0.0, 0.0)
+    slave_actor_refs.[alive_nodes.[new_random_idx]] <! SendMessagePush(s, w)
 
 
 // This is the slave actor which will take in a number N and k, and return N if its a perfect number or 0 of not
@@ -127,13 +124,10 @@ let mySlaveActor (mailbox: Actor<_>) =
         match rcv with
         | GetNeighbors(idx) ->
                         if (topo = "line") then
-                            //let mutable n_left = find_left_neighbor idx num_nodes
-                            //let mutable n_right = 
                             let mutable return_array = Array.create 2 -1
                             return_array.[0] <- find_left_neighbor idx num_nodes
                             return_array.[1] <- find_right_neighbor idx num_nodes
                             return_array <- return_array |> Array.filter ((<>) -1 )
-                            //printfn "For %d return array is %A" idx return_array
                             return! loop idx rumor visited return_array
 
                         if (topo = "full") then
@@ -150,7 +144,6 @@ let mySlaveActor (mailbox: Actor<_>) =
                             return_array.[2] <- find_right_neighbor_2d idx max_index_2d
                             return_array.[3] <- find_left_neighbor_2d idx max_index_2d
                             return_array <- return_array |> Array.filter ((<>) -1 )
-                            //printfn "For %d return array is %A" idx return_array
                             return! loop idx rumor visited return_array
 
         | SendMessageGossip(rumor_string) ->
@@ -160,7 +153,6 @@ let mySlaveActor (mailbox: Actor<_>) =
                             slave_actor_refs.[actor_idx] <! Gossip(rumor_string)
                             return! loop actor_idx rumor_string (visited+1) neighbors
                         else
-                            //Console.WriteLine("Must call random neighbor from {0}", actor_idx)
                             converged_nodes_array actor_idx rumor
                             return! loop actor_idx rumor_string visited neighbors
 
@@ -184,12 +176,12 @@ let mySlaveActor (mailbox: Actor<_>) =
 
                             let mutable random_idx = random.Next(0, advanced_neighbors.Length)
 
-                            // iterate neighbors.Length * 2 times over the neighbors and if all are visited then choose a random number
-                            // neighbors.Length * 2 is chosen because we don't want the loop to be ever-lasting and it seems like a 
+                            // iterate Max(1000,neighbors.Length * 3) times over the neighbors and if all are visited then choose a random number
+                            // neighbors.Length * 3 is chosen because we don't want the loop to be ever-lasting and it seems like a 
                             // reasonable enough value
                             let mutable iterator = 0
 
-                            while (visited_actors.[advanced_neighbors.[random_idx]] < 10 && iterator <= advanced_neighbors.Length * 2) do
+                            while (visited_actors.[advanced_neighbors.[random_idx]] < 10 && iterator <= Math.Max(1000, num_nodes*3)) do
                                 random_idx <- random.Next(0, advanced_neighbors.Length)
                                 iterator <- iterator + 1
 
@@ -223,7 +215,6 @@ let myPushSumActor (mailbox: Actor<_>) =
                             return_array.[0] <- find_left_neighbor idx num_nodes
                             return_array.[1] <- find_right_neighbor idx num_nodes
                             return_array <- return_array |> Array.filter ((<>) -1 )
-                            //printfn "For %d return array is %A" idx return_array
                             return! loop idx state_1 state_2 state_3 (double(idx)) 1.0 return_array
 
                         if (topo = "full") then
@@ -240,66 +231,72 @@ let myPushSumActor (mailbox: Actor<_>) =
                             return_array.[2] <- find_right_neighbor_2d idx max_index_2d
                             return_array.[3] <- find_left_neighbor_2d idx max_index_2d
                             return_array <- return_array |> Array.filter ((<>) -1 )
-                            //printfn "For %d return array is %A" idx return_array
                             return! loop idx state_1 state_2 state_3 (double(idx)) 1.0 return_array
 
         | SendMessagePush(new_s, new_w) ->
-                        //printfn "At %d" actor_idx
+
                         if (converged_actors.[actor_idx] = 0) then
+                            
+                            let mutable updated_s = s + new_s
+                            let mutable updated_w = w + new_w
+                            let mutable ratio = updated_s / updated_w
+
+                            if(abs(ratio - state_2) < 0.00000000001) then
+                                printfn "Converging from main!"
+                                converged_nodes_array_push_sum actor_idx s w
+                                return! loop actor_idx  state_1 state_2 state_3 s w neighbors
+
                             slave_actor_refs.[actor_idx] <! PushSum(new_s, new_w)
-                            return! loop actor_idx  state_1 state_2 state_3 s w neighbors
+                            return! loop actor_idx  state_2 state_3 ratio updated_s updated_w neighbors
                         else
-                            converged_nodes_array_push_sum actor_idx
+                            converged_nodes_array_push_sum actor_idx s w
                             return! loop actor_idx  state_1 state_2 state_3 s w neighbors
 
         | PushSum(new_s, new_w) ->
 
-                        let mutable updated_s = s + new_s
-                        let mutable updated_w = w + new_w
-                        let mutable ratio = updated_s / updated_w
+                        let mutable ratio = new_s / new_w
 
                         if (actor_idx = num_nodes/2) then
-                            Console.WriteLine("Ratio = {0} State_1 = {1}", double(ratio), double(state_2))
+                            Console.WriteLine("Ratio = {0} State_2 = {1} for actor {2}", double(ratio), double(state_2), actor_idx)
 
                         if(abs(ratio - state_2) < 0.00000000001) then
-                            if (actor_idx = num_nodes/2) then
-                                Console.WriteLine("Ratio = {0} State_1 = {1}", double(ratio), double(state_2))
-                            converged_nodes_array_push_sum actor_idx
+                            converged_nodes_array_push_sum actor_idx s w
                             return! loop actor_idx  state_1 state_2 state_3 s w neighbors
+
+                        let mutable random = new System.Random()
+
+                        let mutable advanced_neighbors = neighbors
+                        if(topo = "imp2D") then
+                            let mutable all_actors = [|1..num_nodes|]
+                            for i in 0..advanced_neighbors.Length-1 do
+                                all_actors <- all_actors |> Array.filter ((<>) advanced_neighbors.[i] )
+                            let mutable random_all_actors_idx = random.Next(0, all_actors.Length)
+                            advanced_neighbors <- Array.append advanced_neighbors [|all_actors.[random_all_actors_idx]|]
+
+                        let mutable random_idx = random.Next(0, advanced_neighbors.Length)
+
+                        // iterate Max(neighbors.Length * 3, 1000) times over the neighbors and if all are visited then choose a random number
+                        // neighbors.Length * 3 is chosen because we don't want the loop to be ever-lasting and it seems like a 
+                        // reasonable enough value
+                        let mutable iterator = 0
+
+                        while (converged_actors.[advanced_neighbors.[random_idx]] = 1 && iterator <= Math.Max(1000, num_nodes*3)) do
+                            random_idx <- random.Next(0, advanced_neighbors.Length)
+                            iterator <- iterator + 1
+
+                        if(visited_actors.[advanced_neighbors.[random_idx]] = 0) then
+                            slave_actor_refs.[advanced_neighbors.[random_idx]] <! SendMessagePush(new_s/2.0, new_w/2.0)
                         else
                             let mutable random = new System.Random()
+                            let mutable new_random_idx = random.Next(1, alive_nodes.Length)
+                            slave_actor_refs.[new_random_idx] <! SendMessagePush(new_s/2.0, new_w/2.0)
 
-                            let mutable advanced_neighbors = neighbors
-                            
-                            if(topo = "imp2D") then
-                                let mutable all_actors = [|1..num_nodes|]
-                                for i in 0..advanced_neighbors.Length-1 do
-                                    all_actors <- all_actors |> Array.filter ((<>) advanced_neighbors.[i] )
-                                let mutable random_all_actors_idx = random.Next(0, all_actors.Length)
-                                advanced_neighbors <- Array.append advanced_neighbors [|all_actors.[random_all_actors_idx]|]
-                                
-                            let mutable random_idx = random.Next(0, advanced_neighbors.Length)
+                        slave_actor_refs.[actor_idx] <! PushSum(new_s/2.0, new_w/2.0)
 
-                            // iterate neighbors.Length * 2 times over the neighbors and if all are visited then choose a random number
-                            // neighbors.Length * 2 is chosen because we don't want the loop to be ever-lasting and it seems like a 
-                            // reasonable enough value
-                            let mutable iterator = 0
-
-                            while (converged_actors.[advanced_neighbors.[random_idx]] = 1 && iterator <= 1000) do
-                                random_idx <- random.Next(0, advanced_neighbors.Length)
-                                iterator <- iterator + 1
-
-                            if(visited_actors.[advanced_neighbors.[random_idx]] = 0) then
-                                slave_actor_refs.[advanced_neighbors.[random_idx]] <! SendMessagePush(updated_s/2.0, updated_w/2.0)
-                            else
-                                let mutable random = new System.Random()
-                                let mutable new_random_idx = random.Next(1, alive_nodes.Length)
-                                slave_actor_refs.[new_random_idx] <! SendMessagePush(updated_s/2.0, updated_w/2.0)
-
-                            return! loop actor_idx state_2 state_3 ratio (updated_s/2.0) (updated_w/2.0) neighbors
+                        return! loop actor_idx state_2 state_3 ratio (new_s/2.0) (new_w/2.0) neighbors
         | _ -> printfn "Incorrect entry"                
     }
-    loop 0 0.0 0.0 0.0 0.0 0.0 [||]
+    loop 0 0.0 0.0 0.0 0.0 1.0 [||]
 
 // This is the boss actor responsible for allotting parallel builds on to slaves
 let myBossActor (mailbox: Actor<_>) =
