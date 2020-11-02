@@ -42,6 +42,7 @@ type MyMessage =
 | ReceiveRouteMessage of string [][]*string []*string*int
 | NewNodeAlert of string
 | PrintMe of int
+| Init of int
 
 let timer = System.Diagnostics.Stopwatch()
 
@@ -80,14 +81,15 @@ let setRoutingTableEntry (route_table: string [][]) (neighbor_idx: string) (self
     //printfn "Dexit setRoutingTableEntry"
         with 
             | _ as ex->
-                printfn "Indexing1 Issue"
+                //printfn "Indexing1 Issue"
+                printf ""
     send_message
     new_routing_table
 
 let findClosestEntry (route_table: string [][]) (leafset: string []) (target_idx: string) (current_node_idx: string)=
 
     //first see if leafset contains target_idx
-    Console.WriteLine("Length = {0},{1}", route_table.Length, route_table.[0].Length)
+    //Console.WriteLine("Length = {0},{1}", route_table.Length, route_table.[0].Length)
     let mutable return_node = ""
     let send_message = 
         try
@@ -102,7 +104,7 @@ let findClosestEntry (route_table: string [][]) (leafset: string []) (target_idx
                     let next_digit = charToInt target_idx.[longest_prefix]
                     if next_digit > 7 || longest_prefix>2 then
                         printfn "WHOOO"
-                    Console.WriteLine("{0} {1}", longest_prefix, next_digit)
+                    //Console.WriteLine("{0} {1} for actor {2} and target {3}", longest_prefix, next_digit, current_node_idx, target_idx)
 
                     if longest_prefix <= route_table.Length-1 && next_digit <= 7 then
                         let node_present_or_not = route_table.[longest_prefix].[next_digit]
@@ -118,11 +120,22 @@ let findClosestEntry (route_table: string [][]) (leafset: string []) (target_idx
                                         min_diff <- diff
                                         min_diff_node <- node
                             return_node <- min_diff_node
+                            // can we find a less diff node in the routing table?
+                            let mutable temp_node = ""
+                            for i in 0..route_table.Length-1 do
+                                for j in 0..route_table.[0].Length-1 do
+                                    temp_node <- route_table.[i].[j]
+                                    if temp_node <> "" then
+                                        diff <- Math.Abs(Convert.ToInt32(temp_node) - Convert.ToInt32(target_idx))
+                                        if diff < min_diff then
+                                            min_diff <- diff
+                                            min_diff_node <- temp_node
                         else 
                             return_node <- node_present_or_not
         with 
             | _ as ex->
-                printfn "Indexing Issue"
+                //printfn "Indexing1 Issue"
+                printf ""
     send_message
     return_node
 
@@ -155,8 +168,7 @@ let myPastryActor (mailbox: Actor<_>) =
                         // TODO: leafset wont have all 8 entries - it should have 4 smaller and 4 larger
                         return! loop idx self_hash neighbor_leaf_set routing_table_self neighbor_leaf_set (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
 
-        | PastryInit(idx, nearest_node_idx) ->
-
+        | Init(idx) ->
                         let mutable random_node = new System.Random()
                         let mutable random_num_node = random_node.Next(0, alive_hash.Length)
 
@@ -172,11 +184,18 @@ let myPastryActor (mailbox: Actor<_>) =
                         let mutable neighborhoodset = Array.create 8 ""
                         let localtimer = System.Diagnostics.Stopwatch()
                         localtimer.Start()
-                        //printfn "Pastry Init Small %d fin" idx
                         let sender = mailbox.Sender()
                         sender <! "Pastry Init Small fin"
-                        slave_actor_refs.[nearest_node_idx] <! RouteMessage(bin_str_node, 0)
+                        Console.WriteLine("Init done for {0} with hash {1}", idx, bin_str_node)
                         return! loop idx bin_str_node leafset routing_table_self neighborhoodset (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
+
+        | PastryInit(idx, nearest_node_idx) ->
+                
+                        //printfn "Pastry Init Small %d fin" idx
+                        //let sender = mailbox.Sender()
+                        //sender <! "Pastry Init Small fin"
+                        slave_actor_refs.[nearest_node_idx] <! RouteMessage(actor_key, 0)
+                        return! loop idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
 
         | RouteMessage(node_hash, num) ->
 
@@ -188,24 +207,28 @@ let myPastryActor (mailbox: Actor<_>) =
                         else 
                             //printfn "YESSSSS %d %s" actor_idx node_hash
                         //printfn "Entered RouteMessage with actor_idx=%d actor_key=%s node_hash = %s num = %d" actor_idx actor_key node_hash num
-                        let closest_node = findClosestEntry routing_table leaf_set node_hash actor_key
-                        if closest_node <> "" then
-                            if num = 0 then
-                                //printfn "START1: node_hash = %s num = %d" node_hash num
-                                slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, neighborhood_set, actor_key, num)
-                                //printfn "END1: node_hash = %s num = %d" node_hash num
+
+                            if num >= num_nodes then
+                                slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
                             else
-                                //printfn "START2: node_hash = %s num = %d" node_hash num
-                                slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num)
-                                //printfn "END2: node_hash = %s num = %d" node_hash num
-                            let num_plus_one = num + 1
-                            slave_actor_keys.[closest_node] <! RouteMessage(node_hash, num_plus_one)
-                            //printfn "END3: node_hash = %s num = %d" node_hash num
-                        else 
-                            // This must mean that this is the farthest node similar to node_hash, so send the leafset
-                            // also for null entries
-                            slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
-                        //printfn "END4: node_hash = %s num = %d" node_hash num
+                                let closest_node = findClosestEntry routing_table leaf_set node_hash actor_key
+                                if closest_node <> "" then
+                                    if num = 0 then
+                                        //printfn "START1: node_hash = %s num = %d" node_hash num
+                                        slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, neighborhood_set, actor_key, num)
+                                        //printfn "END1: node_hash = %s num = %d" node_hash num
+                                    else
+                                        //printfn "START2: node_hash = %s num = %d" node_hash num
+                                        slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num)
+                                        //printfn "END2: node_hash = %s num = %d" node_hash num
+                                    let num_plus_one = num + 1
+                                    slave_actor_keys.[closest_node] <! RouteMessage(node_hash, num_plus_one)
+                                    //printfn "END3: node_hash = %s num = %d" node_hash num
+                                else 
+                                    // This must mean that this is the farthest node similar to node_hash, so send the leafset
+                                    // also for null entries
+                                    slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
+                            //printfn "END4: node_hash = %s num = %d" node_hash num
 
                         return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
                     //with 
@@ -218,60 +241,102 @@ let myPastryActor (mailbox: Actor<_>) =
 
                         if actor_key = "" then
                             printfn "N1OOOOOO %d" actor_idx
+                            return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
                         else 
-                            printfn "Y1ESSSSS %d" actor_idx
-                        // set the leafset with closest entries from route table and other_set
-                        let mutable new_leaf_set = leaf_set
-                        for node in other_set do
-                            if node <> "" && actor_key <> "" then
-                                //find the max diff between current actor hash and its own leafset
-                                let mutable max_diff = Math.Abs(Convert.ToInt32(node) - Convert.ToInt32(actor_key))
-                                let mutable max_diff_index = -1
-                                let mutable counter = 0
+                            //printfn "Y1ESSSSS %d" actor_idx
 
-                                for leaf in new_leaf_set do
-                                    if leaf <> "" then
-                                        let mutable leaf_diff = Math.Abs(Convert.ToInt32(node) - Convert.ToInt32(actor_key))
-                                        if leaf_diff > max_diff then
-                                            max_diff <- leaf_diff
-                                            max_diff_index <- counter
-                                            counter <- counter + 1
+                            // set routing table entires
+                            let mutable new_routing_table = routing_table
+                            let longest_prefix = findLongestInitialPrefix other_actor_key actor_key
 
-                                if max_diff_index <> -1 then
-                                    new_leaf_set.[counter] <- node
+                            if longest_prefix < routing_table_size then
+                                for i in other_routing_table.[longest_prefix] do
+                                    new_routing_table <- setRoutingTableEntry new_routing_table i actor_key longest_prefix
 
-                        // set routing table entires
-                        let mutable new_routing_table = routing_table
-                        let longest_prefix = findLongestInitialPrefix other_actor_key actor_key
+                            if num = 0 then
+                                return! loop actor_idx actor_key leaf_set new_routing_table other_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
 
-                        if longest_prefix < routing_table_size then
-                            for i in other_routing_table.[longest_prefix] do
-                                new_routing_table <- setRoutingTableEntry new_routing_table i actor_key longest_prefix
+                            elif num = num_nodes then
+                                Console.WriteLine("{0} with hash {1} init fin", actor_idx, actor_key)
+                                // we must send back information about current node to all the nodes in the routing table
+                                for i in 0..routing_table.Length-1 do
+                                    for j in 0..routing_table.[i].Length-1 do
+                                        if routing_table.[i].[j] <> "" then
+                                            slave_actor_keys.[routing_table.[i].[j]] <! NewNodeAlert(actor_key)
 
-                        if num = 0 then
-                            return! loop actor_idx actor_key new_leaf_set new_routing_table other_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
-                        elif num = num_nodes then
-                            // we must send back information about current node to all the nodes in the routing table
-                            for i in 0..routing_table.Length-1 do
-                                for j in 0..routing_table.[i].Length-1 do
-                                    if routing_table.[i].[j] <> "" then
-                                        slave_actor_keys.[routing_table.[i].[j]] <! NewNodeAlert(actor_key)
-                            //printfn "Done with %d" actor_idx
-                            alive_nodes.[actor_idx] <- actor_idx 
-                            alive_counter <- alive_counter + 1
-                            return! loop actor_idx actor_key other_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
-                        else
-                            return! loop actor_idx actor_key new_leaf_set new_routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
+                                // we must send back information about current node to all the nodes in the leafset
+                                for i in other_set do
+                                    if i <> "" then
+                                        slave_actor_keys.[i] <! NewNodeAlert(actor_key)
+
+                                //printfn "Done with %d" actor_idx
+                                alive_nodes.[actor_idx] <- actor_idx 
+                                alive_counter <- alive_counter + 1
+
+                                return! loop actor_idx actor_key other_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
+                            else
+                                return! loop actor_idx actor_key leaf_set new_routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
 
         | NewNodeAlert (new_node_hash) ->
 
                         if actor_key = "" then
                             printfn "NOOOOOO %d" actor_idx
-                        // change routing table entry based on new node alert
-                        let mutable new_routing_table = routing_table
-                        let longest_prefix = findLongestInitialPrefix new_node_hash actor_key
-                        new_routing_table <- setRoutingTableEntry new_routing_table new_node_hash actor_key longest_prefix
-                        return! loop actor_idx actor_key leaf_set new_routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
+                            return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
+                        else
+                            // change routing table entry based on new node alert
+                            let mutable new_routing_table = routing_table
+                            let longest_prefix = findLongestInitialPrefix new_node_hash actor_key
+                            new_routing_table <- setRoutingTableEntry new_routing_table new_node_hash actor_key longest_prefix
+
+                            // set the leafset with closest entries from route table and other_set
+                            let mutable new_leaf_set = leaf_set
+                            if new_node_hash <> "" && actor_key <> "" then
+                                //find the max diff between current actor hash and its own leafset
+                                let mutable max_diff = Convert.ToInt32(new_node_hash) - Convert.ToInt32(actor_key)
+                                let mutable max_diff_abs = Math.Abs(Convert.ToInt32(new_node_hash) - Convert.ToInt32(actor_key))
+                                let mutable max_diff_index = -1
+                                let mutable counter = 0
+                                let mutable leaf = ""
+
+                                if max_diff < 0 then
+                                    //this means the node is smaller than current node
+                                    for i in 0..3 do
+                                        leaf <- new_leaf_set.[i] 
+                                        if leaf <> "" then
+                                            let mutable leaf_diff = Math.Abs(Convert.ToInt32(new_node_hash) - Convert.ToInt32(actor_key))
+                                            if leaf_diff > max_diff_abs then
+                                                max_diff_abs <- leaf_diff
+                                                max_diff_index <- counter
+                                                counter <- counter + 1
+                                    counter <- 0
+                                    for i in 0..3 do
+                                        leaf <- new_leaf_set.[i] 
+                                        if leaf = "" then
+                                            max_diff_index <- counter
+                                            counter <- counter + 1
+
+                                if max_diff > 0 then
+                                    //this means the node is smaller than current node
+                                    counter <- 4
+                                    for i in 4..7 do
+                                        leaf <- new_leaf_set.[i] 
+                                        if leaf <> "" then
+                                            let mutable leaf_diff = Math.Abs(Convert.ToInt32(new_node_hash) - Convert.ToInt32(actor_key))
+                                            if leaf_diff > max_diff_abs then
+                                                max_diff_abs <- leaf_diff
+                                                max_diff_index <- counter
+                                                counter <- counter + 1
+                                    counter <- 4
+                                    for i in 4..7 do
+                                        leaf <- new_leaf_set.[i] 
+                                        if leaf = "" then
+                                            max_diff_index <- counter
+                                            counter <- counter + 1
+
+                                if max_diff_index <> -1 then
+                                    new_leaf_set.[max_diff_index] <- new_node_hash
+
+                                return! loop actor_idx actor_key leaf_set new_routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
 
         | PrintMe(idx) ->
                         Console.WriteLine("For idx={0} ", idx)
@@ -314,6 +379,7 @@ let myBossActor (mailbox: Actor<_>) =
                         let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
                         //printfn "alive has length = %d and n_bits = %d and num_nodes = %d" alive_hash.Length n_bits num_nodes
                         //printfn "7"
+                        (*
                         for i in 0..8 do
                             let mutable random_num = random.Next(0, alive_hash.Length)
                             //printfn "%d" random_num
@@ -325,31 +391,37 @@ let myBossActor (mailbox: Actor<_>) =
                             alive_nodes.[i] <- random_num
                             alive_counter <- alive_counter + 1
                             small_network_nodes.[i] <- bin_str
-
+                        *)
                         //printfn "Done8"
 
                         //printfn "%A" small_network_nodes
                         //printfn "%A" slave_actor_keys
 
+                        (*
                         for i in 0..8 do
                             //slave_actor_refs.[i] <! PastryInitSmall(i)
                             let mutable res = slave_actor_refs.[i] <? PastryInitSmall(i)
                             let mutable sync = Async.RunSynchronously(res, 100) |> string
                             0|>ignore
+                        *)
                             //Thread.Sleep(100)
                         //printfn "9"
                         //printfn "Done with first 9"
-                        
+
                         // Initialize the slave actors and then store them in a refs array
-                        for i in 9..num_nodes-1 do
+
+                        for i in 0..num_nodes-1 do
                             let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPastryActor
                             slave_actor_refs.[i] <- worker_slave_actor
-                            let mutable random_num = random.Next(0, alive_counter)
-                            let mutable res = slave_actor_refs.[i] <? PastryInit(i, random_num)
+                            let mutable res = slave_actor_refs.[i] <? Init(i)
                             let mutable sync = Async.RunSynchronously(res, 100) |> string
-                            0|>ignore
+                            sync |> ignore
+                            //slave_actor_refs.[i] <! Init(i)
                             //Thread.Sleep(100)
 
+                        for i in 0..num_nodes-1 do
+                            let mutable random_num = random.Next(0, alive_counter)
+                            slave_actor_refs.[i] <! PastryInit(i, random_num)
 
                         //printfn "Done with slave actors initialization!"
                         for i in 0..num_nodes-1 do
