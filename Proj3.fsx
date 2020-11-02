@@ -139,6 +139,82 @@ let findClosestEntry (route_table: string [][]) (leafset: string []) (target_idx
     send_message
     return_node
 
+let findClosestSmallLeaf (tempset: string[]) (node_hash: string) :string=
+    // this finds the closest small leaf in leafset from node_hash
+    let mutable res = ""
+    if node_hash <> "" then
+        let mutable min_diff_abs = num_nodes
+        let mutable min_diff = num_nodes
+        let mutable leaf = ""
+        let mutable diff = min_diff
+        let mutable diff_abs = min_diff_abs
+        for l in 0..tempset.Length-1 do
+            leaf <- tempset.[l]
+            if leaf <> "" then
+                diff <- Convert.ToInt32(leaf) - Convert.ToInt32(node_hash)
+                diff_abs <- Math.Abs(Convert.ToInt32(leaf) - Convert.ToInt32(node_hash))
+                if diff < 0 && diff_abs < min_diff_abs then
+                    res <- leaf
+                    min_diff_abs <- diff_abs
+    res
+
+let findClosestBigLeaf (tempset: string[]) (node_hash: string) :string=
+    // this finds the closest big leaf in leafset from node_hash
+    let mutable res = ""
+    if node_hash <> "" then
+        let mutable min_diff_abs = num_nodes
+        let mutable min_diff = num_nodes
+        let mutable leaf = ""
+        let mutable diff = min_diff
+        let mutable diff_abs = min_diff_abs
+        for l in 0..tempset.Length-1 do
+            leaf <- tempset.[l]
+            if leaf <> "" then
+                diff <- Convert.ToInt32(leaf) - Convert.ToInt32(node_hash)
+                diff_abs <- Math.Abs(Convert.ToInt32(leaf) - Convert.ToInt32(node_hash))
+                if diff > 0 && diff_abs < min_diff_abs then
+                    res <- leaf
+                    min_diff_abs <- diff_abs
+    res
+
+let findFarthestSmallLeaf (tempset: string[]) (node_hash: string) :string=
+    // this finds the farthest small leaf in leafset from node_hash
+    let mutable res = ""
+    if node_hash <> "" then
+        let mutable max_diff_abs = 0
+        let mutable max_diff = 0
+        let mutable leaf = ""
+        let mutable diff = max_diff
+        let mutable diff_abs = max_diff_abs
+        for l in 1..tempset.Length-1 do
+            leaf <- tempset.[l]
+            if leaf <> "" then
+                diff <- Convert.ToInt32(leaf) - Convert.ToInt32(node_hash)
+                diff_abs <- Math.Abs(Convert.ToInt32(leaf) - Convert.ToInt32(node_hash))
+                if diff < 0 && diff_abs > max_diff_abs then
+                    res <- leaf
+                    max_diff_abs <- diff_abs
+    res
+
+let findFarthestBigLeaf (tempset: string[]) (node_hash: string) :string=
+    // this finds the farthest big leaf in leafset from node_hash
+    let mutable res = ""
+    if node_hash <> "" then
+        let mutable max_diff_abs = 0
+        let mutable max_diff = 0
+        let mutable leaf = ""
+        let mutable diff = max_diff
+        let mutable diff_abs = max_diff_abs
+        for l in 1..tempset.Length-1 do
+            leaf <- tempset.[l]
+            if leaf <> "" then
+                diff <- Convert.ToInt32(leaf) - Convert.ToInt32(node_hash)
+                diff_abs <- Math.Abs(Convert.ToInt32(leaf) - Convert.ToInt32(node_hash))
+                if diff > 0 && diff_abs > max_diff_abs then
+                    res <- leaf
+                    max_diff_abs <- diff_abs
+    res
+
 
 // This is the slave actor which will take in a number N and k, and return N if its a perfect number or 0 of not
 let myPastryActor (mailbox: Actor<_>) =
@@ -151,22 +227,40 @@ let myPastryActor (mailbox: Actor<_>) =
         | PastryInitSmall(idx) ->
 
                         let self_hash = small_network_nodes.[idx]
-                        let neighbor_leaf_set = small_network_nodes |> Array.filter ((<>) self_hash )
+                        let mutable neighbor_leaf_set = small_network_nodes |> Array.filter ((<>) self_hash )
                         //printfn "Pastry Init Small %d and self_hash %s" idx self_hash
                         let mutable routing_table_self = Array.create routing_table_size (Array.create 8 "")
+                        let mutable leafset = Array.zeroCreate 8
 
                         for i in neighbor_leaf_set do
                             //printfn "i=%s self=%s" i self_hash
                             let longest_prefix = findLongestInitialPrefix i self_hash
                             if longest_prefix < routing_table_size then
                                 routing_table_self <- setRoutingTableEntry routing_table_self i self_hash longest_prefix
+
+                        // find the small yet closest 4 nodes for leafset
+                        for i in 0..3 do
+                            leafset.[i] <- findClosestSmallLeaf neighbor_leaf_set self_hash
+                            neighbor_leaf_set <- small_network_nodes |> Array.filter ((<>) leafset.[i] )
+
+                        // find the big yet closest 4 nodes for leafset
+                        for i in 4..7 do
+                            leafset.[i] <- findClosestBigLeaf neighbor_leaf_set self_hash
+                            neighbor_leaf_set <- small_network_nodes |> Array.filter ((<>) leafset.[i] )
+
                         let localtimer = System.Diagnostics.Stopwatch()
                         //localtimer.Start()
                         //printfn "Pastry Init Small %d fin" idx
+                        Console.WriteLine("{0} with hash {1} init fin", idx, self_hash)
+                        Console.WriteLine("For idx={0} ", idx)
+                        printfn "%A" routing_table_self
+                        printfn "%A" leafset
+
+                        alive_nodes.[idx] <- self_hash
+                        alive_counter <- alive_counter + 1
                         let sender = mailbox.Sender()
                         sender <! "Pastry Init Small fin"
-                        // TODO: leafset wont have all 8 entries - it should have 4 smaller and 4 larger
-                        return! loop idx self_hash neighbor_leaf_set routing_table_self neighbor_leaf_set (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
+                        return! loop idx self_hash leafset routing_table_self neighbor_leaf_set (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
 
         | Init(idx) ->
                         let mutable random_node = new System.Random()
@@ -244,6 +338,10 @@ let myPastryActor (mailbox: Actor<_>) =
                             return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
                         else 
                             //printfn "Y1ESSSSS %d" actor_idx
+                            if alive_nodes.[actor_idx] <> "" then
+                                alive_counter <- alive_counter - 1
+                                alive_nodes.[actor_idx] <- ""
+                                ALL_COMPUTATIONS_DONE <- 0
 
                             // set routing table entires
                             let mutable new_routing_table = routing_table
@@ -270,9 +368,16 @@ let myPastryActor (mailbox: Actor<_>) =
                                         slave_actor_keys.[i] <! NewNodeAlert(actor_key)
 
                                 //printfn "Done with %d" actor_idx
-                                alive_nodes.[actor_idx] <- actor_idx 
+                                alive_nodes.[actor_idx] <- actor_key 
                                 alive_counter <- alive_counter + 1
+                                Console.WriteLine("For idx={0} ", actor_idx)
+                                printfn "%A" routing_table
+                                printfn "%A" leaf_set
 
+
+                                if alive_counter >= num_nodes then
+                                    ALL_COMPUTATIONS_DONE <- 1
+                                
                                 return! loop actor_idx actor_key other_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
                             else
                                 return! loop actor_idx actor_key leaf_set new_routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
@@ -300,14 +405,13 @@ let myPastryActor (mailbox: Actor<_>) =
 
                                 if max_diff < 0 then
                                     //this means the node is smaller than current node
-                                    for i in 0..3 do
-                                        leaf <- new_leaf_set.[i] 
-                                        if leaf <> "" then
-                                            let mutable leaf_diff = Math.Abs(Convert.ToInt32(new_node_hash) - Convert.ToInt32(actor_key))
-                                            if leaf_diff > max_diff_abs then
-                                                max_diff_abs <- leaf_diff
-                                                max_diff_index <- counter
-                                                counter <- counter + 1
+                                    let mutable new_farthest_small_node = findFarthestSmallLeaf new_leaf_set actor_key
+                                    if new_farthest_small_node <> "" then
+                                        let farthest_diff_abs = Math.Abs(Convert.ToInt32(new_farthest_small_node) - Convert.ToInt32(actor_key))
+                                        if farthest_diff_abs > max_diff_abs then
+                                            //find the id where the new_farthest_smallest_node resides
+                                            max_diff_index <- new_leaf_set |> Array.findIndex ((=) new_farthest_small_node) 
+                                    //see if there are empty spaces
                                     counter <- 0
                                     for i in 0..3 do
                                         leaf <- new_leaf_set.[i] 
@@ -316,16 +420,14 @@ let myPastryActor (mailbox: Actor<_>) =
                                             counter <- counter + 1
 
                                 if max_diff > 0 then
-                                    //this means the node is smaller than current node
-                                    counter <- 4
-                                    for i in 4..7 do
-                                        leaf <- new_leaf_set.[i] 
-                                        if leaf <> "" then
-                                            let mutable leaf_diff = Math.Abs(Convert.ToInt32(new_node_hash) - Convert.ToInt32(actor_key))
-                                            if leaf_diff > max_diff_abs then
-                                                max_diff_abs <- leaf_diff
-                                                max_diff_index <- counter
-                                                counter <- counter + 1
+                                    //this means the node is larger than current node
+                                    let mutable new_farthest_big_node = findFarthestBigLeaf new_leaf_set actor_key
+                                    if new_farthest_big_node <> "" then
+                                        let farthest_diff_abs = Math.Abs(Convert.ToInt32(new_farthest_big_node) - Convert.ToInt32(actor_key))
+                                        if farthest_diff_abs > max_diff_abs then
+                                            //find the id where the new_farthest_smallest_node resides
+                                            max_diff_index <- new_leaf_set |> Array.findIndex ((=) new_farthest_big_node) 
+                                    //see if there are empty spaces
                                     counter <- 4
                                     for i in 4..7 do
                                         leaf <- new_leaf_set.[i] 
@@ -375,12 +477,12 @@ let myBossActor (mailbox: Actor<_>) =
 
                         //printfn "6"
                         //Initialize the first 8 actors to form a small network
-                        small_network_nodes <- Array.zeroCreate (9)
+                        small_network_nodes <- Array.zeroCreate (num_nodes/5)
                         let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
                         //printfn "alive has length = %d and n_bits = %d and num_nodes = %d" alive_hash.Length n_bits num_nodes
                         //printfn "7"
-                        (*
-                        for i in 0..8 do
+
+                        for i in 0..num_nodes/5-1 do
                             let mutable random_num = random.Next(0, alive_hash.Length)
                             //printfn "%d" random_num
                             alive_hash <- alive_hash |> Array.filter ((<>) random_num )
@@ -388,29 +490,27 @@ let myBossActor (mailbox: Actor<_>) =
                             let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPastryActor
                             slave_actor_refs.[i] <- worker_slave_actor
                             slave_actor_keys <- slave_actor_keys.Add(bin_str, slave_actor_refs.[i])
-                            alive_nodes.[i] <- random_num
-                            alive_counter <- alive_counter + 1
                             small_network_nodes.[i] <- bin_str
-                        *)
+                        
                         //printfn "Done8"
 
                         //printfn "%A" small_network_nodes
                         //printfn "%A" slave_actor_keys
 
-                        (*
-                        for i in 0..8 do
+
+                        for i in 0..num_nodes/5-1 do
                             //slave_actor_refs.[i] <! PastryInitSmall(i)
                             let mutable res = slave_actor_refs.[i] <? PastryInitSmall(i)
                             let mutable sync = Async.RunSynchronously(res, 100) |> string
                             0|>ignore
-                        *)
+                        
                             //Thread.Sleep(100)
                         //printfn "9"
                         //printfn "Done with first 9"
 
                         // Initialize the slave actors and then store them in a refs array
 
-                        for i in 0..num_nodes-1 do
+                        for i in num_nodes/5..num_nodes-1 do
                             let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPastryActor
                             slave_actor_refs.[i] <- worker_slave_actor
                             let mutable res = slave_actor_refs.[i] <? Init(i)
@@ -419,20 +519,21 @@ let myBossActor (mailbox: Actor<_>) =
                             //slave_actor_refs.[i] <! Init(i)
                             //Thread.Sleep(100)
 
-                        for i in 0..num_nodes-1 do
+                        for i in num_nodes/5..num_nodes-1 do
                             let mutable random_num = random.Next(0, alive_counter)
                             slave_actor_refs.[i] <! PastryInit(i, random_num)
 
                         //printfn "Done with slave actors initialization!"
+                        (*
                         for i in 0..num_nodes-1 do
                             let mutable res = slave_actor_refs.[i] <? PrintMe(i)
                             let mutable sync = Async.RunSynchronously(res, 1000) |> string
                             sync|>ignore
                             //0|>ignore
-
+                        *)
                         printfn "Map: %A" slave_actor_keys
 
-                        ALL_COMPUTATIONS_DONE <- 1
+
                         
                         timer.Start()
                         
