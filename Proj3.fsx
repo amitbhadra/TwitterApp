@@ -45,7 +45,7 @@ type MyMessage =
 | ReceiveRouteMessage of string [][]*string []*string*int
 | NewNodeAlert of string
 | PrintMe of int
-| Init of int
+| Init of int*string
 
 let timer = System.Diagnostics.Stopwatch()
 
@@ -270,15 +270,7 @@ let myPastryActor (mailbox: Actor<_>) =
                         sender <! "Pastry Init Small fin"
                         return! loop idx self_hash leafset routing_table_self neighbor_leaf_set (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
 
-        | Init(idx) ->
-                        let mutable random_node = new System.Random()
-                        let mutable random_num_node = random_node.Next(0, alive_hash.Length)
-
-                        alive_hash <- alive_hash |> Array.filter ((<>) random_num_node )
-                        let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
-                        let bin_str_node = Convert.ToString(random_num_node, 8).PadLeft(n_bits, '0')
-                        //printfn "Pastry Init  = %d nearest_node_idx = %d random_num = %d random_hash = %s" idx nearest_node_idx random_num_node bin_str_node
-                        slave_actor_keys <- slave_actor_keys.Add(bin_str_node, slave_actor_refs.[idx])
+        | Init(idx, bin_str) ->
 
                         //printfn "Gone here"
                         let mutable routing_table_self = get2DArray routing_table_size 8
@@ -288,8 +280,8 @@ let myPastryActor (mailbox: Actor<_>) =
                         localtimer.Start()
                         let sender = mailbox.Sender()
                         sender <! "Pastry Init Small fin"
-                        Console.WriteLine("Init done for {0} with hash {1}", idx, bin_str_node)
-                        return! loop idx bin_str_node leafset routing_table_self neighborhoodset (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
+                        Console.WriteLine("Init done for {0} with hash {1}", idx, bin_str)
+                        return! loop idx bin_str leafset routing_table_self neighborhoodset (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
 
         | PastryInit(idx, nearest_node_idx) ->
                 
@@ -516,7 +508,7 @@ let myBossActor (mailbox: Actor<_>) =
                             let mutable random_num = random.Next(0, alive_hash.Length)
                             //printfn "%d" random_num
                             alive_hash <- alive_hash |> Array.filter ((<>) random_num )
-                            let bin_str = Convert.ToString(random_num, 8).PadLeft(n_bits, '0')
+                            let mutable bin_str = Convert.ToString(random_num, 8).PadLeft(n_bits, '0')
                             let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPastryActor
                             slave_actor_refs.[i] <- worker_slave_actor
                             slave_actor_keys <- slave_actor_keys.Add(bin_str, slave_actor_refs.[i])
@@ -541,9 +533,13 @@ let myBossActor (mailbox: Actor<_>) =
                         // Initialize the slave actors and then store them in a refs array
 
                         for i in first_init..num_nodes-1 do
+                            let mutable random_num = random.Next(0, alive_hash.Length)
+                            alive_hash <- alive_hash |> Array.filter ((<>) random_num )
+                            let mutable bin_str = Convert.ToString(random_num, 8).PadLeft(n_bits, '0')
                             let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPastryActor
                             slave_actor_refs.[i] <- worker_slave_actor
-                            let mutable res = slave_actor_refs.[i] <? Init(i)
+                            slave_actor_keys <- slave_actor_keys.Add(bin_str, slave_actor_refs.[i])
+                            let mutable res = slave_actor_refs.[i] <? Init(i, bin_str)
                             let mutable sync = Async.RunSynchronously(res, 1000) |> string
                             sync |> ignore
                             //slave_actor_refs.[i] <! Init(i)
@@ -561,11 +557,13 @@ let myBossActor (mailbox: Actor<_>) =
                             sync|>ignore
                             //0|>ignore
                         *)
-                        printfn "Map: %A" slave_actor_keys
+
                         Console.WriteLine("ALLDONE")
 
                         while(NODES_INITIALIZED = 0) do
                             0|>ignore
+
+                        printfn "Map: %A" slave_actor_keys.Count
 
                         Console.WriteLine("ROUTING...")
                         //Now we start routing the messages. Choose a random start and end index and route to them and count how  many hops
