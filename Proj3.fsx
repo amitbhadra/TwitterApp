@@ -105,8 +105,8 @@ let findClosestEntry (route_table: string [][]) (leafset: string []) (target_idx
                     let longest_prefix = findLongestInitialPrefix current_node_idx target_idx
                     //printfn "%d %d " longest_prefix (int(target_idx.[longest_prefix]))
                     let next_digit = charToInt target_idx.[longest_prefix]
-                    if next_digit > 7 || longest_prefix>2 then
-                        printfn "WHOOO"
+                    //if next_digit > 7 || longest_prefix>2 then
+                        //printfn "WHOOO"
                     //Console.WriteLine("{0} {1} for actor {2} and target {3}", longest_prefix, next_digit, current_node_idx, target_idx)
 
                     if longest_prefix <= route_table.Length-1 && next_digit <= 7 then
@@ -264,8 +264,7 @@ let myPastryActor (mailbox: Actor<_>) =
                         printfn "%A" routing_table_self
                         printfn "%A" leafset
 
-                        alive_nodes.[idx] <- self_hash
-                        alive_counter <- alive_counter + 1
+
                         let sender = mailbox.Sender()
                         sender <! "Pastry Init Small fin"
                         return! loop idx self_hash leafset routing_table_self neighbor_leaf_set (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
@@ -303,25 +302,25 @@ let myPastryActor (mailbox: Actor<_>) =
                         //printfn "Entered RouteMessage with actor_idx=%d actor_key=%s node_hash = %s num = %d" actor_idx actor_key node_hash num
 
                             if num >= num_nodes then
-                                slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
+                                slave_actor_refs.[slave_actor_keys.[node_hash]] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
                             else
                                 let closest_node = findClosestEntry routing_table leaf_set node_hash actor_key
                                 if closest_node <> "" then
                                     if num = 0 then
                                         //printfn "START1: node_hash = %s num = %d" node_hash num
-                                        slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, neighborhood_set, actor_key, num)
+                                        slave_actor_refs.[slave_actor_keys.[node_hash]] <! ReceiveRouteMessage(routing_table, neighborhood_set, actor_key, num)
                                         //printfn "END1: node_hash = %s num = %d" node_hash num
                                     else
                                         //printfn "START2: node_hash = %s num = %d" node_hash num
-                                        slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num)
+                                        slave_actor_refs.[slave_actor_keys.[node_hash]] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num)
                                         //printfn "END2: node_hash = %s num = %d" node_hash num
                                     let num_plus_one = num + 1
-                                    slave_actor_keys.[closest_node] <! RouteMessage(node_hash, num_plus_one)
+                                    slave_actor_refs.[slave_actor_keys.[closest_node]] <! RouteMessage(node_hash, num_plus_one)
                                     //printfn "END3: node_hash = %s num = %d" node_hash num
                                 else 
                                     // This must mean that this is the farthest node similar to node_hash, so send the leafset
                                     // also for null entries
-                                    slave_actor_keys.[node_hash] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
+                                    slave_actor_refs.[slave_actor_keys.[node_hash]] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
                             //printfn "END4: node_hash = %s num = %d" node_hash num
 
                         return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
@@ -361,15 +360,15 @@ let myPastryActor (mailbox: Actor<_>) =
                                 for i in 0..routing_table.Length-1 do
                                     for j in 0..routing_table.[i].Length-1 do
                                         if routing_table.[i].[j] <> "" then
-                                            slave_actor_keys.[routing_table.[i].[j]] <! NewNodeAlert(actor_key)
+                                            slave_actor_refs.[slave_actor_keys.[routing_table.[i].[j]]] <! NewNodeAlert(actor_key)
 
                                 // we must send back information about current node to all the nodes in the leafset
                                 for i in other_set do
                                     if i <> "" then
-                                        slave_actor_keys.[i] <! NewNodeAlert(actor_key)
+                                        slave_actor_refs.[slave_actor_keys.[i]] <! NewNodeAlert(actor_key)
 
                                 //printfn "Done with %d" actor_idx
-                                alive_nodes.[actor_idx] <- actor_key 
+                                alive_nodes.[actor_idx] <- 1 
                                 alive_counter <- alive_counter + 1
                                 Console.WriteLine("For idx={0} ", actor_idx)
                                 printfn "%A" routing_table
@@ -465,7 +464,7 @@ let myPastryActor (mailbox: Actor<_>) =
                             let next_node = findClosestEntry routing_table leaf_set target_hash actor_key
                             if next_node <> "" then
                                 let hopsplusone = hop + 1
-                                slave_actor_keys.[next_node] <! Deliver(target_hash, hopsplusone)
+                                slave_actor_refs.[slave_actor_keys.[next_node]] <! Deliver(target_hash, hopsplusone)
                         return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
 
         | _ -> printfn "Incorrect entry"                
@@ -497,7 +496,7 @@ let myBossActor (mailbox: Actor<_>) =
 
                         //printfn "6"
                         //Initialize the first 8 actors to form a small network
-                        let first_init = num_nodes*4/5
+                        let first_init = num_nodes*1/5
                         small_network_nodes <- Array.zeroCreate (first_init)
                         let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
                         //printfn "alive has length = %d and n_bits = %d and num_nodes = %d" alive_hash.Length n_bits num_nodes
@@ -505,13 +504,14 @@ let myBossActor (mailbox: Actor<_>) =
 
 
                         for i in 0..first_init-1 do
-                            let mutable random_num = random.Next(0, alive_hash.Length)
+                            let mutable random_idx = random.Next(0, alive_hash.Length)
+                            let mutable random_num = alive_hash.[random_idx]
                             //printfn "%d" random_num
                             alive_hash <- alive_hash |> Array.filter ((<>) random_num )
                             let mutable bin_str = Convert.ToString(random_num, 8).PadLeft(n_bits, '0')
                             let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPastryActor
                             slave_actor_refs.[i] <- worker_slave_actor
-                            slave_actor_keys <- slave_actor_keys.Add(bin_str, slave_actor_refs.[i])
+                            slave_actor_keys <- slave_actor_keys.Add(bin_str, i)
                             small_network_nodes.[i] <- bin_str
                         
                         //printfn "Done8"
@@ -524,6 +524,8 @@ let myBossActor (mailbox: Actor<_>) =
                             //slave_actor_refs.[i] <! PastryInitSmall(i)
                             let mutable res = slave_actor_refs.[i] <? PastryInitSmall(i)
                             let mutable sync = Async.RunSynchronously(res, 1000) |> string
+                            alive_nodes.[i] <- i
+                            alive_counter <- alive_counter + 1
                             0|>ignore
                         
                             //Thread.Sleep(100)
@@ -533,12 +535,13 @@ let myBossActor (mailbox: Actor<_>) =
                         // Initialize the slave actors and then store them in a refs array
 
                         for i in first_init..num_nodes-1 do
-                            let mutable random_num = random.Next(0, alive_hash.Length)
+                            let mutable random_idx = random.Next(0, alive_hash.Length)
+                            let mutable random_num = alive_hash.[random_idx]
                             alive_hash <- alive_hash |> Array.filter ((<>) random_num )
                             let mutable bin_str = Convert.ToString(random_num, 8).PadLeft(n_bits, '0')
                             let mutable worker_slave_actor = spawn mailbox (sprintf "workerActor%i" i) myPastryActor
                             slave_actor_refs.[i] <- worker_slave_actor
-                            slave_actor_keys <- slave_actor_keys.Add(bin_str, slave_actor_refs.[i])
+                            slave_actor_keys <- slave_actor_keys.Add(bin_str, i)
                             let mutable res = slave_actor_refs.[i] <? Init(i, bin_str)
                             let mutable sync = Async.RunSynchronously(res, 1000) |> string
                             sync |> ignore
@@ -564,7 +567,7 @@ let myBossActor (mailbox: Actor<_>) =
                             0|>ignore
 
                         printfn "Map: %A" slave_actor_keys.Count
-
+                        printfn "Alive hashes: %A" alive_hash
                         Console.WriteLine("ROUTING...")
                         //Now we start routing the messages. Choose a random start and end index and route to them and count how  many hops
                         let mutable start_id = 0
@@ -578,7 +581,7 @@ let myBossActor (mailbox: Actor<_>) =
                             start_hash <- Convert.ToString(start_id, 8).PadLeft(n_bits, '0')
                             end_hash <- Convert.ToString(end_id, 8).PadLeft(n_bits, '0')
                             Console.WriteLine("Start = {0} with hash {1} and end = {2} with hash {3}", start_id, start_hash, end_id, end_hash)
-                            slave_actor_keys.[start_hash] <! Deliver(end_hash, 0)
+                            slave_actor_refs.[slave_actor_keys.[start_hash]] <! Deliver(end_hash, 0)
 
                         Console.WriteLine("Total Hops covered = {0}, Average Hops = {1}", hops_travelled, hops_travelled/num_requests)
                         ALL_COMPUTATIONS_DONE <- 1
