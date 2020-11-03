@@ -42,7 +42,9 @@ type MyMessage =
 | NewNodeAlert of string
 | PrintMe of int
 | Init of int
-| Arr2D of string[,]
+
+type Arr2D = 
+| Array2D of string[][]
 
 let inline charToInt c = int c - int '0'
 
@@ -150,12 +152,14 @@ let myPastryActor (mailbox: Actor<_>) =
                         // find the small yet closest 4 nodes for leafset
                         for i in 0..3 do
                             leafset.[i] <- findClosestSmallLeaf neighbor_leaf_set self_hash
-                            neighbor_leaf_set <- small_network_nodes |> Array.filter ((<>) leafset.[i] )
+                            Console.WriteLine("clostest small = {0}", leafset.[i])
+                            neighbor_leaf_set <- neighbor_leaf_set |> Array.filter ((<>) leafset.[i] )
 
                         // find the big yet closest 4 nodes for leafset
                         for i in 4..7 do
                             leafset.[i] <- findClosestBigLeaf neighbor_leaf_set self_hash
-                            neighbor_leaf_set <- small_network_nodes |> Array.filter ((<>) leafset.[i] )
+                            Console.WriteLine("clostest big = {0}", leafset.[i])
+                            neighbor_leaf_set <- neighbor_leaf_set |> Array.filter ((<>) leafset.[i] )
 
                         let localtimer = System.Diagnostics.Stopwatch()
                         //localtimer.Start()
@@ -169,11 +173,11 @@ let myPastryActor (mailbox: Actor<_>) =
                         alive_counter <- alive_counter + 1
                         let sender = mailbox.Sender()
                         sender <! "Pastry Init Small fin"
-                        return! loop idx self_hash leafset RT neighbor_leaf_set (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
+                        return! loop idx self_hash leafset routing_table_self neighbor_leaf_set (float(localtimer.Elapsed.TotalMilliseconds)) localtimer
 
         | _ -> printfn "Incorrect entry"                
     }
-    loop 0 "" [||] [[,]] [||] 0.0 (System.Diagnostics.Stopwatch())
+    loop 0 "" [||] [||] [||] 0.0 (System.Diagnostics.Stopwatch())
 
 
 
@@ -223,7 +227,7 @@ let myBossActor (mailbox: Actor<_>) =
                         //printfn "%A" slave_actor_keys
 
 
-                        for i in 0..num_nodes/5-1 do
+                        for i in 0..1 do
                             //slave_actor_refs.[i] <! PastryInitSmall(i)
                             let mutable res = slave_actor_refs.[i] <? PastryInitSmall(i)
                             let mutable sync = Async.RunSynchronously(res, 100) |> string
