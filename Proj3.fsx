@@ -19,6 +19,7 @@ let mutable num_nodes = 0
 let n_base = 2
 let mutable routing_table_size = 0
 let mutable alive_counter = 0
+let mutable hops_reached_destination = 0
 
 let mutable slave_actor_refs = Array.empty
 let mutable boss_actor_ref = Array.empty
@@ -46,6 +47,7 @@ type MyMessage =
 | NewNodeAlert of string
 | PrintMe of int
 | Init of int*string
+| DeliverRandom of string*int
 
 let timer = System.Diagnostics.Stopwatch()
 
@@ -375,7 +377,7 @@ let myPastryActor (mailbox: Actor<_>) =
                                 printfn "%A" leaf_set
 
 
-                                if alive_counter >= num_nodes then
+                                if float(alive_counter) >= 0.99*float(num_nodes) then
                                     NODES_INITIALIZED <- 1
                                 
                                 return! loop actor_idx actor_key other_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
@@ -459,6 +461,7 @@ let myPastryActor (mailbox: Actor<_>) =
 
                         if target_hash = actor_key then
                             hops_travelled <- hops_travelled + hop
+                            hops_reached_destination <- hops_reached_destination + 1
                             Console.WriteLine("REACHED!")
                         else
                             let next_node = findClosestEntry routing_table leaf_set target_hash actor_key
@@ -467,6 +470,30 @@ let myPastryActor (mailbox: Actor<_>) =
                                 slave_actor_refs.[slave_actor_keys.[next_node]] <! Deliver(target_hash, hopsplusone)
                         return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
 
+        | DeliverRandom(target_hash, hop) ->
+
+                        if hop = 0 then
+                            let mutable random = new System.Random()
+                            let mutable end_id = random.Next(0, num_nodes-1)
+                            let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
+                            let mutable end_hash = Convert.ToString(end_id, 8).PadLeft(n_bits, '0')
+                            Console.WriteLine("End = {0} with hash {1}", end_id, end_hash)
+                            let mutable closest_neighbor = findClosestEntry routing_table leaf_set end_hash actor_key
+                            slave_actor_refs.[slave_actor_keys.[closest_neighbor]] <! Deliver(end_hash, 1)
+
+                        else 
+                            if target_hash = actor_key then
+                                hops_travelled <- hops_travelled + hop
+                                hops_reached_destination <- hops_reached_destination + 1
+                                Console.WriteLine("REACHED!")
+                            else
+                                let next_node = findClosestEntry routing_table leaf_set target_hash actor_key
+                                if next_node <> "" then
+                                    let hopsplusone = hop + 1
+                                    slave_actor_refs.[slave_actor_keys.[next_node]] <! Deliver(target_hash, hopsplusone)
+
+                        return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
+                         
         | _ -> printfn "Incorrect entry"                
     }
     loop 0 "" [||] [||] [||] 0.0 (System.Diagnostics.Stopwatch())
@@ -496,7 +523,8 @@ let myBossActor (mailbox: Actor<_>) =
 
                         //printfn "6"
                         //Initialize the first 8 actors to form a small network
-                        let first_init = num_nodes*1/5
+                        let first_init = num_nodes*3/5
+                        //num_nodes*1/20
                         small_network_nodes <- Array.zeroCreate (first_init)
                         let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
                         //printfn "alive has length = %d and n_bits = %d and num_nodes = %d" alive_hash.Length n_bits num_nodes
@@ -564,6 +592,8 @@ let myBossActor (mailbox: Actor<_>) =
                         Console.WriteLine("ALLDONE")
 
                         while(NODES_INITIALIZED = 0) do
+                            Thread.Sleep(1000)
+                            printfn "%d" alive_counter
                             0|>ignore
 
                         printfn "Map: %A" slave_actor_keys.Count
@@ -576,12 +606,21 @@ let myBossActor (mailbox: Actor<_>) =
                         let mutable end_hash = ""
                         for i in 0..num_requests-1 do
                             Thread.Sleep(1000)
-                            start_id <- random.Next(0, num_nodes-1)
-                            end_id <- random.Next(0, num_nodes-1)
-                            start_hash <- Convert.ToString(start_id, 8).PadLeft(n_bits, '0')
-                            end_hash <- Convert.ToString(end_id, 8).PadLeft(n_bits, '0')
-                            Console.WriteLine("Start = {0} with hash {1} and end = {2} with hash {3}", start_id, start_hash, end_id, end_hash)
-                            slave_actor_refs.[slave_actor_keys.[start_hash]] <! Deliver(end_hash, 0)
+                            //start_id <- random.Next(0, num_nodes-1)
+                            //end_id <- random.Next(0, num_nodes-1)
+                            //start_hash <- Convert.ToString(start_id, 8).PadLeft(n_bits, '0')
+                            //end_hash <- Convert.ToString(end_id, 8).PadLeft(n_bits, '0')
+                            //Console.WriteLine("Start = {0} with hash {1} and end = {2} with hash {3}", start_id, start_hash, end_id, end_hash)
+                            //slave_actor_refs.[slave_actor_keys.[start_hash]] <! Deliver(end_hash, 1)
+                            for i in 0..num_nodes-1 do
+                                slave_actor_refs.[i] <! DeliverRandom("", 0)
+
+
+                        //while(hops_reached_destination < num_requests*9/10) do
+                        while(hops_reached_destination < num_requests*num_nodes*9/10) do
+                            Thread.Sleep(1000)
+                            Console.WriteLine("Total Hops covered = {0}, Nodes reached destination = {1}, Percentage = {2}", hops_travelled, hops_reached_destination, float(hops_reached_destination/(num_requests*num_nodes)))
+                            0|>ignore
 
                         Console.WriteLine("Total Hops covered = {0}, Average Hops = {1}", hops_travelled, hops_travelled/num_requests)
                         ALL_COMPUTATIONS_DONE <- 1
