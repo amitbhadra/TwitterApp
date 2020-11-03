@@ -289,6 +289,7 @@ let myPastryActor (mailbox: Actor<_>) =
                         //printfn "Pastry Init Small %d fin" idx
                         //let sender = mailbox.Sender()
                         //sender <! "Pastry Init Small fin"
+                        Console.WriteLine("Nearest neighbor = {0}", nearest_node_idx)
                         slave_actor_refs.[nearest_node_idx] <! RouteMessage(actor_key, 0)
                         return! loop idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
 
@@ -304,6 +305,7 @@ let myPastryActor (mailbox: Actor<_>) =
                         //printfn "Entered RouteMessage with actor_idx=%d actor_key=%s node_hash = %s num = %d" actor_idx actor_key node_hash num
 
                             if num >= num_nodes then
+                                Console.WriteLine("Num nodes reached")
                                 slave_actor_refs.[slave_actor_keys.[node_hash]] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
                             else
                                 let closest_node = findClosestEntry routing_table leaf_set node_hash actor_key
@@ -322,6 +324,7 @@ let myPastryActor (mailbox: Actor<_>) =
                                 else 
                                     // This must mean that this is the farthest node similar to node_hash, so send the leafset
                                     // also for null entries
+                                    Console.WriteLine("No matching entires found for num = {0}", num)
                                     slave_actor_refs.[slave_actor_keys.[node_hash]] <! ReceiveRouteMessage(routing_table, leaf_set, actor_key, num_nodes)
                             //printfn "END4: node_hash = %s num = %d" node_hash num
 
@@ -462,7 +465,7 @@ let myPastryActor (mailbox: Actor<_>) =
                         if target_hash = actor_key then
                             hops_travelled <- hops_travelled + hop
                             hops_reached_destination <- hops_reached_destination + 1
-                            Console.WriteLine("REACHED!")
+                            //Console.WriteLine("REACHED!")
                         else
                             let next_node = findClosestEntry routing_table leaf_set target_hash actor_key
                             if next_node <> "" then
@@ -477,20 +480,20 @@ let myPastryActor (mailbox: Actor<_>) =
                             let mutable end_id = random.Next(0, num_nodes-1)
                             let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
                             let mutable end_hash = Convert.ToString(end_id, 8).PadLeft(n_bits, '0')
-                            Console.WriteLine("End = {0} with hash {1}", end_id, end_hash)
+                            //Console.WriteLine("End = {0} with hash {1}", end_id, end_hash)
                             let mutable closest_neighbor = findClosestEntry routing_table leaf_set end_hash actor_key
-                            slave_actor_refs.[slave_actor_keys.[closest_neighbor]] <! Deliver(end_hash, 1)
+                            slave_actor_refs.[slave_actor_keys.[closest_neighbor]] <! DeliverRandom(end_hash, 1)
 
                         else 
                             if target_hash = actor_key then
                                 hops_travelled <- hops_travelled + hop
                                 hops_reached_destination <- hops_reached_destination + 1
-                                Console.WriteLine("REACHED!")
+                                //Console.WriteLine("REACHED!")
                             else
                                 let next_node = findClosestEntry routing_table leaf_set target_hash actor_key
                                 if next_node <> "" then
                                     let hopsplusone = hop + 1
-                                    slave_actor_refs.[slave_actor_keys.[next_node]] <! Deliver(target_hash, hopsplusone)
+                                    slave_actor_refs.[slave_actor_keys.[next_node]] <! DeliverRandom(target_hash, hopsplusone)
 
                         return! loop actor_idx actor_key leaf_set routing_table neighborhood_set (float(localtime.Elapsed.TotalMilliseconds)) localtime
                          
@@ -523,7 +526,7 @@ let myBossActor (mailbox: Actor<_>) =
 
                         //printfn "6"
                         //Initialize the first 8 actors to form a small network
-                        let first_init = num_nodes*3/5
+                        let first_init = num_nodes*4/5
                         //num_nodes*1/20
                         small_network_nodes <- Array.zeroCreate (first_init)
                         let n_bits = int(ceil(Math.Log(float(num_nodes), 8.0)))
@@ -619,7 +622,7 @@ let myBossActor (mailbox: Actor<_>) =
                         //while(hops_reached_destination < num_requests*9/10) do
                         while(hops_reached_destination < num_requests*num_nodes*9/10) do
                             Thread.Sleep(1000)
-                            Console.WriteLine("Total Hops covered = {0}, Nodes reached destination = {1}, Percentage = {2}", hops_travelled, hops_reached_destination, float(hops_reached_destination/(num_requests*num_nodes)))
+                            Console.WriteLine("Total Hops covered = {0}, Nodes reached destination = {1}, Total requests to be sent sent = {2}", hops_travelled, hops_reached_destination, num_requests*num_nodes)
                             0|>ignore
 
                         Console.WriteLine("Total Hops covered = {0}, Average Hops = {1}", hops_travelled, hops_travelled/num_requests)
